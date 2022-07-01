@@ -124,10 +124,17 @@ bool Tmpl8::Game::left_of_line(vec2 line_start, vec2 line_end, vec2 point)
 // Collision detection
 // Targeting etc..
 // -----------------------------------------------------------
+// ====
+// Big-O analysis simple: O (N²)
+// Big-O analysis complex: O (N + N² + N + N + N + N + N² + N² + N² + N² + N) Or O (6N + 5N²)
+// ====
 void Game::update(float deltaTime)
 {
     //Calculate the route to the destination for each tank using BFS
     //Initializing routes here so it gets counted for performance..
+    // ====
+    // Big-O analysis: O (N)
+    // ====
     if (frame_count == 0)
     {
         for (Tank& t : tanks)
@@ -137,6 +144,9 @@ void Game::update(float deltaTime)
     }
 
     //Check tank collision and nudge tanks away from each other
+    // ====
+    // Big-O analysis: O (N²)
+    // ====
     for (Tank& tank : tanks)
     {
         if (tank.active)
@@ -160,6 +170,9 @@ void Game::update(float deltaTime)
     }
 
     //Update tanks
+    // ====
+    // Big-O analysis: O (N)
+    // ====
     for (Tank& tank : tanks)
     {
         if (tank.active)
@@ -180,6 +193,9 @@ void Game::update(float deltaTime)
     }
 
     //Update smoke plumes
+    // ====
+    // Big-O analysis: O (N)
+    // ====
     for (Smoke& smoke : smokes)
     {
         smoke.tick();
@@ -189,6 +205,9 @@ void Game::update(float deltaTime)
     forcefield_hull.clear();
 
     //Find first active tank (this loop is a bit disgusting, fix?)
+    // ====
+    // Big-O analysis: O (N)
+    // ====
     int first_active = 0;
     for (Tank& tank : tanks)
     {
@@ -200,6 +219,9 @@ void Game::update(float deltaTime)
     }
     vec2 point_on_hull = tanks.at(first_active).position;
     //Find left most tank position
+    // ====
+    // Big-O analysis: O (N)
+    // ====
     for (Tank& tank : tanks)
     {
         if (tank.active)
@@ -212,6 +234,9 @@ void Game::update(float deltaTime)
     }
 
     //Calculate convex hull for 'rocket barrier'
+    // ====
+    // Big-O analysis: O (N²)
+    // ====
     for (Tank& tank : tanks)
     {
         if (tank.active)
@@ -239,6 +264,9 @@ void Game::update(float deltaTime)
     }
 
     //Update rockets
+    // ====
+    // Big-O analysis: O (N²)
+    // ====
     for (Rocket& rocket : rockets)
     {
         rocket.tick();
@@ -263,6 +291,9 @@ void Game::update(float deltaTime)
 
     //Disable rockets if they collide with the "forcefield"
     //Hint: A point to convex hull intersection test might be better here? :) (Disable if outside)
+    // ====
+    // Big-O analysis: O (N²)
+    // ====
     for (Rocket& rocket : rockets)
     {
         if (rocket.active)
@@ -284,6 +315,9 @@ void Game::update(float deltaTime)
     rockets.erase(std::remove_if(rockets.begin(), rockets.end(), [](const Rocket& rocket) { return !rocket.active; }), rockets.end());
 
     //Update particle beams
+    // ====
+    // Big-O analysis: O (N²)
+    // ====
     for (Particle_beam& particle_beam : particle_beams)
     {
         particle_beam.tick(tanks);
@@ -302,6 +336,9 @@ void Game::update(float deltaTime)
     }
 
     //Update explosion sprites and remove when done with remove erase idiom
+    // ====
+    // Big-O analysis: O (N)
+    // ====
     for (Explosion& explosion : explosions)
     {
         explosion.tick();
