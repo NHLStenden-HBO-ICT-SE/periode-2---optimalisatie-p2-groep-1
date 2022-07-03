@@ -14,7 +14,7 @@ constexpr auto health_bar_width = 70;
 constexpr auto max_frames = 2000;
 
 //Global performance timer
-constexpr auto REF_PERFORMANCE = 114757; //UPDATE THIS WITH YOUR REFERENCE PERFORMANCE (see console after 2k frames)
+constexpr auto REF_PERFORMANCE = 293764; //UPDATE THIS WITH YOUR REFERENCE PERFORMANCE (see console after 2k frames)
 static timer perf_timer;
 static float duration;
 
@@ -143,27 +143,148 @@ void Game::update(float deltaTime)
         }
     }
 
+    // TODO: Duplicate tank list with only active elements, sort from left to right and up to down.
+    vector<Tank*> activeTanks;
+    for (Tank& tank : tanks) {
+        if (tank.active)
+        {
+            activeTanks.push_back(&tank);
+        }
+    }
+
+    for (Rocket& rocket : rockets) {
+        rocket.tick();
+    }
+
+    //for (vector<Tank*>::iterator tank = activeTanks.begin(); tank != activeTanks.end(); tank++) {
+    for (auto tank : activeTanks) {
+        // Check for tank collision.
+
+        //Move tanks according to speed and nudges (see above) also reload
+        tank->tick(background_terrain);
+
+        //Shoot at closest target if reloaded
+        if (tank->rocket_reloaded())
+        {
+            Tank& target = find_closest_enemy(*tank);
+
+            rockets.push_back(Rocket(tank->position, (target.get_position() - tank->position).normalized() * 3, rocket_radius, tank->allignment, ((tank->allignment == RED) ? &rocket_red : &rocket_blue)));
+
+            tank->reload_rocket();
+        }
+
+        // Check for rocket collision.
+
+        // Check for beam collision.
+
+        // Calculate convex hull.
+        if (!rockets.empty())
+        {
+            // Add to convex hull, rather than calculating the full hull.
+        }
+    }
+
+    // TODO: Check if it's more efficient to also delete rockets here.
+    // Check if rocket is outside the convex hull.
+    for (Rocket& rocket : rockets) {
+        for (size_t i = 0; i < forcefield_hull.size(); i++)
+        {
+            if (left_of_line(forcefield_hull.at(i), forcefield_hull.at((i + 1) % forcefield_hull.size()), rocket.position))
+            {
+                explosions.push_back(Explosion(&explosion, rocket.position));
+                rocket.active = false;
+                break;
+            }
+        }
+    }
+    //Remove exploded rockets with remove erase idiom
+    rockets.erase(std::remove_if(rockets.begin(), rockets.end(), [](const Rocket& rocket) { return !rocket.active; }), rockets.end());
+
+
+    //Update explosion sprites and remove when done with remove erase idiom
+    // ====
+    // Big-O analysis: O (N)
+    // ====
+    for (Explosion& explosion : explosions)
+    {
+        explosion.tick();
+    }
+    explosions.erase(std::remove_if(explosions.begin(), explosions.end(), [](const Explosion& explosion) { return explosion.done(); }), explosions.end());
+
+    //Update particle beams
+    // ====
+    // Big-O analysis: O (N)
+    // ====
+    for (Particle_beam& particle_beam : particle_beams)
+    {
+        particle_beam.tick(tanks);
+    }
+
+    //Update smoke plumes
+    // ====
+    // Big-O analysis: O (N)
+    // ====
+    for (Smoke& smoke : smokes)
+    {
+        smoke.tick();
+    }
+}
+
+// -----------------------------------------------------------
+// Update the game state:
+// Move all objects
+// Update sprite frames
+// Collision detection
+// Targeting etc..
+// -----------------------------------------------------------
+// ====
+// Big-O analysis simple: O (N²)
+// Big-O analysis complex: O (N + N² + N + N + N + N + N² + N² + N² + N² + N) Or O (6N + 5N²)
+// ====
+void Game::update(float deltaTime)
+{
+    //Calculate the route to the destination for each tank using BFS
+    //Initializing routes here so it gets counted for performance..
+    // ====
+    // Big-O analysis: O (N)
+    // ====
+    if (frame_count == 0)
+    {
+        for (Tank& t : tanks)
+        {
+            t.set_route(background_terrain.get_route(t, t.target));
+        }
+    }
+
+    vector<Tank*> activeTanks;
+    for (Tank& tank : tanks) {
+        if (tank.active)
+        {
+            activeTanks.push_back(&tank);
+        }
+    }
+
     //Check tank collision and nudge tanks away from each other
     // ====
     // Big-O analysis: O (N²)
     // ====
-    for (Tank& tank : tanks)
+    for (vector<Tank*>::iterator tank = activeTanks.begin(); tank != activeTanks.end(); tank++)
     {
-        if (tank.active)
+        if ((*tank)->active)
         {
-            for (Tank& other_tank : tanks)
+            for (vector<Tank*>::iterator other_tank = activeTanks.begin(); other_tank != activeTanks.end(); other_tank++)
             {
-                if (&tank == &other_tank || !other_tank.active) continue;
+                if (&(*tank) == &(*other_tank) || !(*other_tank)->active) continue;
 
-                vec2 dir = tank.get_position() - other_tank.get_position();
+                vec2 dir = (*tank)->get_position() - (*other_tank)->get_position();
                 float dir_squared_len = dir.sqr_length();
 
-                float col_squared_len = (tank.get_collision_radius() + other_tank.get_collision_radius());
+                float col_squared_len = ((*tank)->get_collision_radius() + (*other_tank)->get_collision_radius());
                 col_squared_len *= col_squared_len;
 
                 if (dir_squared_len < col_squared_len)
                 {
-                    tank.push(dir.normalized(), 1.f);
+                    (*tank)->push(dir.normalized(), 1.f);
                 }
             }
         }
@@ -301,6 +422,7 @@ void Game::update(float deltaTime)
             for (size_t i = 0; i < forcefield_hull.size(); i++)
             {
                 if (circle_segment_intersect(forcefield_hull.at(i), forcefield_hull.at((i + 1) % forcefield_hull.size()), rocket.position, rocket.collision_radius))
+                //if (left_of_line(forcefield_hull.at(i), forcefield_hull.at((i + 1) % forcefield_hull.size()), rocket.position))
                 {
                     explosions.push_back(Explosion(&explosion, rocket.position));
                     rocket.active = false;
