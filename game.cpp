@@ -143,23 +143,37 @@ void Game::update(float deltaTime)
         }
     }
 
-    // TODO: Duplicate tank list with only active elements, sort from left to right and up to down.
+    for (Rocket& rocket : rockets) {
+        rocket.tick();
+    }
+
+    // TODO: Sort from left to right and up to down, might not be needed. Its only needed for the convex hull algorithm.
     vector<Tank*> activeTanks;
     for (Tank& tank : tanks) {
         if (tank.active)
         {
             activeTanks.push_back(&tank);
+            // Check for tank collision.
+            for (Tank& other_tank : tanks)
+            {
+                if (&tank == &other_tank || !other_tank.active) continue;
+
+                vec2 dir = tank.get_position() - other_tank.get_position();
+                float dir_squared_len = dir.sqr_length();
+
+                float col_squared_len = (tank.get_collision_radius() + other_tank.get_collision_radius());
+                col_squared_len *= col_squared_len;
+
+                if (dir_squared_len < col_squared_len)
+                {
+                    tank.push(dir.normalized(), 1.f);
+                }
+            }
         }
     }
 
-    for (Rocket& rocket : rockets) {
-        rocket.tick();
-    }
-
-    //for (vector<Tank*>::iterator tank = activeTanks.begin(); tank != activeTanks.end(); tank++) {
+    //for (vector<Tank*>::iterator tank = activeTanks.begin(); tank != activeTanks.end();) {
     for (auto tank : activeTanks) {
-        // Check for tank collision.
-
         //Move tanks according to speed and nudges (see above) also reload
         tank->tick(background_terrain);
 
@@ -174,26 +188,97 @@ void Game::update(float deltaTime)
         }
 
         // Check for rocket collision.
-
-        // Check for beam collision.
-
-        // Calculate convex hull.
-        if (!rockets.empty())
+        //Check if rocket collides with enemy tank, spawn explosion, and if tank is destroyed spawn a smoke plume
+        for (Rocket& rocket : rockets)
         {
-            // Add to convex hull, rather than calculating the full hull.
+            if ((tank->allignment != rocket.allignment) && rocket.intersects(tank->position, tank->collision_radius))
+            {
+                // TODO: Should remove rocket from list
+                rocket.active = false;
+                explosions.push_back(Explosion(&explosion, tank->position));
+
+                if (tank->hit(rocket_hit_value))
+                {
+                    smokes.push_back(Smoke(smoke, tank->position - vec2(7, 24)));
+                    break;
+                }
+            }
+        }
+
+        if (tank->active) {
+            // Check for beam collision.
+            for (Particle_beam& particle_beam : particle_beams)
+            {
+                if (particle_beam.rectangle.intersects_circle(tank->get_position(), tank->get_collision_radius()))
+                {
+                    if (tank->hit(particle_beam.damage))
+                    {
+                        smokes.push_back(Smoke(smoke, tank->position - vec2(0, 48)));
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Calculate convex hull.
+    if (!rockets.empty())
+    {
+        activeTanks.erase(std::remove_if(activeTanks.begin(), activeTanks.end(), [](const Tank* tank) { return !(*tank).active;  }), activeTanks.end());
+        forcefield_hull.clear();
+        // TODO: sort active tanks here.
+        vec2 point_on_hull = (*activeTanks[0]).position;
+
+        //Find left most tank position
+        // ====
+        // Big-O analysis: O (N)
+        // ====
+        for (auto tank : activeTanks)
+        {
+            if (tank->position.x <= point_on_hull.x)
+            {
+                point_on_hull = tank->position;
+            }
+        }
+
+        //Calculate convex hull for 'rocket barrier'
+        // ====
+        // Big-O analysis: O (N²)
+        // ====
+        for (auto tank : activeTanks)
+        {
+            forcefield_hull.push_back(point_on_hull);
+            vec2 endpoint = (*activeTanks[0]).position;
+
+            for (auto tank : activeTanks)
+            {
+                if ((endpoint == point_on_hull) || left_of_line(point_on_hull, endpoint, tank->position))
+                {
+                    endpoint = tank->position;
+                }
+
+            }
+            point_on_hull = endpoint;
+
+            if (endpoint == forcefield_hull.at(0))
+            {
+                break;
+            }
         }
     }
 
     // TODO: Check if it's more efficient to also delete rockets here.
     // Check if rocket is outside the convex hull.
     for (Rocket& rocket : rockets) {
-        for (size_t i = 0; i < forcefield_hull.size(); i++)
-        {
-            if (left_of_line(forcefield_hull.at(i), forcefield_hull.at((i + 1) % forcefield_hull.size()), rocket.position))
+        if (rocket.active) {
+            for (size_t i = 0; i < forcefield_hull.size(); i++)
             {
-                explosions.push_back(Explosion(&explosion, rocket.position));
-                rocket.active = false;
-                break;
+                if (left_of_line(forcefield_hull.at(i), forcefield_hull.at((i + 1) % forcefield_hull.size()), rocket.position))
+                {
+                    explosions.push_back(Explosion(&explosion, rocket.position));
+                    rocket.active = false;
+                    break;
+                }
             }
         }
     }
@@ -241,233 +326,224 @@ void Game::update(float deltaTime)
 // Big-O analysis simple: O (N²)
 // Big-O analysis complex: O (N + N² + N + N + N + N + N² + N² + N² + N² + N) Or O (6N + 5N²)
 // ====
-void Game::update(float deltaTime)
-{
-    //Calculate the route to the destination for each tank using BFS
-    //Initializing routes here so it gets counted for performance..
-    // ====
-    // Big-O analysis: O (N)
-    // ====
-    if (frame_count == 0)
-    {
-        for (Tank& t : tanks)
-        {
-            t.set_route(background_terrain.get_route(t, t.target));
-        }
-    }
-
-    vector<Tank*> activeTanks;
-    for (Tank& tank : tanks) {
-        if (tank.active)
-        {
-            activeTanks.push_back(&tank);
-        }
-    }
-
-    //Check tank collision and nudge tanks away from each other
-    // ====
-    // Big-O analysis: O (N²)
-    // ====
-    for (vector<Tank*>::iterator tank = activeTanks.begin(); tank != activeTanks.end(); tank++)
-    {
-        if ((*tank)->active)
-        {
-            for (vector<Tank*>::iterator other_tank = activeTanks.begin(); other_tank != activeTanks.end(); other_tank++)
-            {
-                if (&(*tank) == &(*other_tank) || !(*other_tank)->active) continue;
-
-                vec2 dir = (*tank)->get_position() - (*other_tank)->get_position();
-                float dir_squared_len = dir.sqr_length();
-
-                float col_squared_len = ((*tank)->get_collision_radius() + (*other_tank)->get_collision_radius());
-                col_squared_len *= col_squared_len;
-
-                if (dir_squared_len < col_squared_len)
-                {
-                    (*tank)->push(dir.normalized(), 1.f);
-                }
-            }
-        }
-    }
-
-    //Update tanks
-    // ====
-    // Big-O analysis: O (N)
-    // ====
-    for (Tank& tank : tanks)
-    {
-        if (tank.active)
-        {
-            //Move tanks according to speed and nudges (see above) also reload
-            tank.tick(background_terrain);
-
-            //Shoot at closest target if reloaded
-            if (tank.rocket_reloaded())
-            {
-                Tank& target = find_closest_enemy(tank);
-
-                rockets.push_back(Rocket(tank.position, (target.get_position() - tank.position).normalized() * 3, rocket_radius, tank.allignment, ((tank.allignment == RED) ? &rocket_red : &rocket_blue)));
-
-                tank.reload_rocket();
-            }
-        }
-    }
-
-    //Update smoke plumes
-    // ====
-    // Big-O analysis: O (N)
-    // ====
-    for (Smoke& smoke : smokes)
-    {
-        smoke.tick();
-    }
-
-    //Calculate "forcefield" around active tanks
-    forcefield_hull.clear();
-
-    //Find first active tank (this loop is a bit disgusting, fix?)
-    // ====
-    // Big-O analysis: O (N)
-    // ====
-    int first_active = 0;
-    for (Tank& tank : tanks)
-    {
-        if (tank.active)
-        {
-            break;
-        }
-        first_active++;
-    }
-    vec2 point_on_hull = tanks.at(first_active).position;
-    //Find left most tank position
-    // ====
-    // Big-O analysis: O (N)
-    // ====
-    for (Tank& tank : tanks)
-    {
-        if (tank.active)
-        {
-            if (tank.position.x <= point_on_hull.x)
-            {
-                point_on_hull = tank.position;
-            }
-        }
-    }
-
-    //Calculate convex hull for 'rocket barrier'
-    // ====
-    // Big-O analysis: O (N²)
-    // ====
-    for (Tank& tank : tanks)
-    {
-        if (tank.active)
-        {
-            forcefield_hull.push_back(point_on_hull);
-            vec2 endpoint = tanks.at(first_active).position;
-
-            for (Tank& tank : tanks)
-            {
-                if (tank.active)
-                {
-                    if ((endpoint == point_on_hull) || left_of_line(point_on_hull, endpoint, tank.position))
-                    {
-                        endpoint = tank.position;
-                    }
-                }
-            }
-            point_on_hull = endpoint;
-
-            if (endpoint == forcefield_hull.at(0))
-            {
-                break;
-            }
-        }
-    }
-
-    //Update rockets
-    // ====
-    // Big-O analysis: O (N²)
-    // ====
-    for (Rocket& rocket : rockets)
-    {
-        rocket.tick();
-
-        //Check if rocket collides with enemy tank, spawn explosion, and if tank is destroyed spawn a smoke plume
-        for (Tank& tank : tanks)
-        {
-            if (tank.active && (tank.allignment != rocket.allignment) && rocket.intersects(tank.position, tank.collision_radius))
-            {
-                explosions.push_back(Explosion(&explosion, tank.position));
-
-                if (tank.hit(rocket_hit_value))
-                {
-                    smokes.push_back(Smoke(smoke, tank.position - vec2(7, 24)));
-                }
-
-                rocket.active = false;
-                break;
-            }
-        }
-    }
-
-    //Disable rockets if they collide with the "forcefield"
-    //Hint: A point to convex hull intersection test might be better here? :) (Disable if outside)
-    // ====
-    // Big-O analysis: O (N²)
-    // ====
-    for (Rocket& rocket : rockets)
-    {
-        if (rocket.active)
-        {
-            for (size_t i = 0; i < forcefield_hull.size(); i++)
-            {
-                if (circle_segment_intersect(forcefield_hull.at(i), forcefield_hull.at((i + 1) % forcefield_hull.size()), rocket.position, rocket.collision_radius))
-                //if (left_of_line(forcefield_hull.at(i), forcefield_hull.at((i + 1) % forcefield_hull.size()), rocket.position))
-                {
-                    explosions.push_back(Explosion(&explosion, rocket.position));
-                    rocket.active = false;
-                }
-            }
-        }
-    }
-
-
-
-    //Remove exploded rockets with remove erase idiom
-    rockets.erase(std::remove_if(rockets.begin(), rockets.end(), [](const Rocket& rocket) { return !rocket.active; }), rockets.end());
-
-    //Update particle beams
-    // ====
-    // Big-O analysis: O (N²)
-    // ====
-    for (Particle_beam& particle_beam : particle_beams)
-    {
-        particle_beam.tick(tanks);
-
-        //Damage all tanks within the damage window of the beam (the window is an axis-aligned bounding box)
-        for (Tank& tank : tanks)
-        {
-            if (tank.active && particle_beam.rectangle.intersects_circle(tank.get_position(), tank.get_collision_radius()))
-            {
-                if (tank.hit(particle_beam.damage))
-                {
-                    smokes.push_back(Smoke(smoke, tank.position - vec2(0, 48)));
-                }
-            }
-        }
-    }
-
-    //Update explosion sprites and remove when done with remove erase idiom
-    // ====
-    // Big-O analysis: O (N)
-    // ====
-    for (Explosion& explosion : explosions)
-    {
-        explosion.tick();
-    }
-
-    explosions.erase(std::remove_if(explosions.begin(), explosions.end(), [](const Explosion& explosion) { return explosion.done(); }), explosions.end());
-}
+//void Game::update(float deltaTime)
+//{
+//    //Calculate the route to the destination for each tank using BFS
+//    //Initializing routes here so it gets counted for performance..
+//    // ====
+//    // Big-O analysis: O (N)
+//    // ====
+//    if (frame_count == 0)
+//    {
+//        for (Tank& t : tanks)
+//        {
+//            t.set_route(background_terrain.get_route(t, t.target));
+//        }
+//    }
+//
+//    //Check tank collision and nudge tanks away from each other
+//    // ====
+//    // Big-O analysis: O (N²)
+//    // ====
+//    for (Tank& tank : tanks)
+//    {
+//        if (tank.active)
+//        {
+//            for (Tank& other_tank : tanks)
+//            {
+//                if (&tank == &other_tank || !other_tank.active) continue;
+//
+//                vec2 dir = tank.get_position() - other_tank.get_position();
+//                float dir_squared_len = dir.sqr_length();
+//
+//                float col_squared_len = (tank.get_collision_radius() + other_tank.get_collision_radius());
+//                col_squared_len *= col_squared_len;
+//
+//                if (dir_squared_len < col_squared_len)
+//                {
+//                    tank.push(dir.normalized(), 1.f);
+//                }
+//            }
+//        }
+//    }
+//
+//    //Update tanks
+//    // ====
+//    // Big-O analysis: O (N)
+//    // ====
+//    for (Tank& tank : tanks)
+//    {
+//        if (tank.active)
+//        {
+//            //Move tanks according to speed and nudges (see above) also reload
+//            tank.tick(background_terrain);
+//
+//            //Shoot at closest target if reloaded
+//            if (tank.rocket_reloaded())
+//            {
+//                Tank& target = find_closest_enemy(tank);
+//
+//                rockets.push_back(Rocket(tank.position, (target.get_position() - tank.position).normalized() * 3, rocket_radius, tank.allignment, ((tank.allignment == RED) ? &rocket_red : &rocket_blue)));
+//
+//                tank.reload_rocket();
+//            }
+//        }
+//    }
+//
+//    //Update smoke plumes
+//    // ====
+//    // Big-O analysis: O (N)
+//    // ====
+//    for (Smoke& smoke : smokes)
+//    {
+//        smoke.tick();
+//    }
+//
+//    //Calculate "forcefield" around active tanks
+//    forcefield_hull.clear();
+//
+//    //Find first active tank (this loop is a bit disgusting, fix?)
+//    // ====
+//    // Big-O analysis: O (N)
+//    // ====
+//    int first_active = 0;
+//    for (Tank& tank : tanks)
+//    {
+//        if (tank.active)
+//        {
+//            break;
+//        }
+//        first_active++;
+//    }
+//    vec2 point_on_hull = tanks.at(first_active).position;
+//    //Find left most tank position
+//    // ====
+//    // Big-O analysis: O (N)
+//    // ====
+//    for (Tank& tank : tanks)
+//    {
+//        if (tank.active)
+//        {
+//            if (tank.position.x <= point_on_hull.x)
+//            {
+//                point_on_hull = tank.position;
+//            }
+//        }
+//    }
+//
+//    //Calculate convex hull for 'rocket barrier'
+//    // ====
+//    // Big-O analysis: O (N²)
+//    // ====
+//    for (Tank& tank : tanks)
+//    {
+//        if (tank.active)
+//        {
+//            forcefield_hull.push_back(point_on_hull);
+//            vec2 endpoint = tanks.at(first_active).position;
+//
+//            for (Tank& tank : tanks)
+//            {
+//                if (tank.active)
+//                {
+//                    if ((endpoint == point_on_hull) || left_of_line(point_on_hull, endpoint, tank.position))
+//                    {
+//                        endpoint = tank.position;
+//                    }
+//                }
+//            }
+//            point_on_hull = endpoint;
+//
+//            if (endpoint == forcefield_hull.at(0))
+//            {
+//                break;
+//            }
+//        }
+//    }
+//
+//    //Update rockets
+//    // ====
+//    // Big-O analysis: O (N²)
+//    // ====
+//    for (Rocket& rocket : rockets)
+//    {
+//        rocket.tick();
+//
+//        //Check if rocket collides with enemy tank, spawn explosion, and if tank is destroyed spawn a smoke plume
+//        for (Tank& tank : tanks)
+//        {
+//            if (tank.active && (tank.allignment != rocket.allignment) && rocket.intersects(tank.position, tank.collision_radius))
+//            {
+//                explosions.push_back(Explosion(&explosion, tank.position));
+//
+//                if (tank.hit(rocket_hit_value))
+//                {
+//                    smokes.push_back(Smoke(smoke, tank.position - vec2(7, 24)));
+//                }
+//
+//                rocket.active = false;
+//                break;
+//            }
+//        }
+//    }
+//
+//    //Disable rockets if they collide with the "forcefield"
+//    //Hint: A point to convex hull intersection test might be better here? :) (Disable if outside)
+//    // ====
+//    // Big-O analysis: O (N²)
+//    // ====
+//    for (Rocket& rocket : rockets)
+//    {
+//        if (rocket.active)
+//        {
+//            for (size_t i = 0; i < forcefield_hull.size(); i++)
+//            {
+//                if (circle_segment_intersect(forcefield_hull.at(i), forcefield_hull.at((i + 1) % forcefield_hull.size()), rocket.position, rocket.collision_radius))
+//                {
+//                    explosions.push_back(Explosion(&explosion, rocket.position));
+//                    rocket.active = false;
+//                }
+//            }
+//        }
+//    }
+//
+//
+//
+//    //Remove exploded rockets with remove erase idiom
+//    rockets.erase(std::remove_if(rockets.begin(), rockets.end(), [](const Rocket& rocket) { return !rocket.active; }), rockets.end());
+//
+//    //Update particle beams
+//    // ====
+//    // Big-O analysis: O (N²)
+//    // ====
+//    for (Particle_beam& particle_beam : particle_beams)
+//    {
+//        particle_beam.tick(tanks);
+//
+//        //Damage all tanks within the damage window of the beam (the window is an axis-aligned bounding box)
+//        for (Tank& tank : tanks)
+//        {
+//            if (tank.active && particle_beam.rectangle.intersects_circle(tank.get_position(), tank.get_collision_radius()))
+//            {
+//                if (tank.hit(particle_beam.damage))
+//                {
+//                    smokes.push_back(Smoke(smoke, tank.position - vec2(0, 48)));
+//                }
+//            }
+//        }
+//    }
+//
+//    //Update explosion sprites and remove when done with remove erase idiom
+//    // ====
+//    // Big-O analysis: O (N)
+//    // ====
+//    for (Explosion& explosion : explosions)
+//    {
+//        explosion.tick();
+//    }
+//
+//    explosions.erase(std::remove_if(explosions.begin(), explosions.end(), [](const Explosion& explosion) { return explosion.done(); }), explosions.end());
+//}
 
 // -----------------------------------------------------------
 // Draw all sprites to the screen
